@@ -1,6 +1,5 @@
 import numpy as np
 from sklearn.mixture import GaussianMixture
-from sklearn.discriminant_analysis import LinearDiscriminantAnalysis as SklearnLDA
 
 # GMM Discriminant Analysis
 class GDA:
@@ -15,7 +14,15 @@ class GDA:
 
         # Fit GMM to each class
         for cls in self.classes_:
-            gmm = GaussianMixture(n_components=self.n_components, covariance_type='full')
+            if isinstance(self.n_components, list):
+                gmm_components = self.n_components[cls]
+            else:
+                gmm_components = self.n_components
+            print(gmm_components)
+
+            gmm = GaussianMixture(
+                n_components=gmm_components, covariance_type="full"
+            )
             gmm.fit(X[y == cls])
             self.gmms[cls] = gmm
 
@@ -39,4 +46,3 @@ class GDA:
         # Convert log-likelihoods to probabilities using softmax
         likelihoods = np.exp(log_likelihoods)
         return likelihoods / np.sum(likelihoods, axis=1, keepdims=True)
-

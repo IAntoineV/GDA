@@ -18,7 +18,6 @@ class GDA:
                 gmm_components = self.n_components[cls]
             else:
                 gmm_components = self.n_components
-            print(gmm_components)
 
             gmm = GaussianMixture(
                 n_components=gmm_components, covariance_type="full"

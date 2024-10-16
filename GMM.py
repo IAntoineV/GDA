@@ -1,9 +1,10 @@
 import numpy as np
 from scipy.stats import multivariate_normal
+from sklearn.cluster import KMeans
 
 
 class GMM:
-    def __init__(self, n_components, max_iter=100, tol=1e-3):
+    def __init__(self, n_components, max_iter=100, tol=1e-3, km_init=False, km_cov_init=False):
         """
         Gaussian Mixture Model using the Expectation-Maximization algorithm.
 
@@ -15,7 +16,9 @@ class GMM:
         self.n_components = n_components
         self.max_iter = max_iter
         self.tol = tol
-
+        self.kmeans_init = km_init
+        self.kmeans_covariance_init = km_cov_init
+        
     def _initialize_parameters(self, X):
         """
         Initialize the GMM parameters: weights, means, and covariances.
@@ -25,8 +28,25 @@ class GMM:
         """
         n_samples, n_features = X.shape
         self.weights_ = np.ones(self.n_components) / self.n_components
-        self.means_ = X[np.random.choice(n_samples, self.n_components, False)]
-        self.covariances_ = np.array([np.cov(X.T) for _ in range(self.n_components)])
+
+        if self.kmeans_init:
+            kmeans = KMeans(n_clusters=self.n_components, n_init=10)
+            kmeans.fit(X)
+            self.means_ = kmeans.cluster_centers_
+        else:
+            self.means_ = X[np.random.choice(n_samples, self.n_components, False)]
+        
+        if self.kmeans_init and self.kmeans_covariance_init:
+                covariances_list_ = []
+                for k in range(self.n_components):
+                    cluster_k = X[kmeans.labels_ == k]
+                    if cluster_k.shape[0] > 1:
+                        covariances_list_.append(np.cov(cluster_k.T))
+                    else:
+                        covariances_list_.append(np.eye(n_features) * 1e-6)
+                self.covariances_ = np.array(covariances_list_)
+        else:
+            self.covariances_ = np.array([np.cov(X.T) for _ in range(self.n_components)])
 
     def _e_step(self, X):
         """

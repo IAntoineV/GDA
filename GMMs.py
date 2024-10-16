@@ -1,7 +1,9 @@
+from typing import Type
+
 import numpy as np
 from scipy.stats import multivariate_normal
 from sklearn.cluster import KMeans
-
+import matplotlib.pyplot as plt
 
 class GMM:
     def __init__(self, n_components, max_iter=100, tol=1e-3, km_init=False, km_cov_init=False):
@@ -58,6 +60,8 @@ class GMM:
         Returns:
         - responsibilities: An array of shape (n_samples, n_components) representing the probability
           that each data point belongs to each Gaussian component.
+        - total_likelihoods: An array of shape (n_samples, 1) representing the likelihood of each x_i
+          given the paraemeters.
         """
         n_samples, n_features = X.shape
         likelihoods = np.zeros((n_samples, self.n_components))
@@ -67,11 +71,10 @@ class GMM:
             likelihoods[:, k] = self.weights_[k] * multivariate_normal.pdf(
                 X, mean=self.means_[k], cov=self.covariances_[k]
             )
-
         # Compute responsibilities (posterior probabilities)
         total_likelihood = np.sum(likelihoods, axis=1, keepdims=True)
         responsibilities = likelihoods / total_likelihood
-        return responsibilities
+        return responsibilities, total_likelihood
 
     def _m_step(self, X, responsibilities):
         """
@@ -112,13 +115,14 @@ class GMM:
 
         for i in range(self.max_iter):
             # E-step
-            responsibilities = self._e_step(X)
+            responsibilities, total_likelihood = self._e_step(X)
 
             # M-step
             self._m_step(X, responsibilities)
 
             # Check for convergence
-            new_log_likelihood = np.sum(np.log(np.sum(responsibilities, axis=1)))
+            new_log_likelihood = np.sum(np.log(total_likelihood))
+            
             if np.abs(new_log_likelihood - log_likelihood) < self.tol:
                 break
             log_likelihood = new_log_likelihood
@@ -133,7 +137,7 @@ class GMM:
         Returns:
         - labels: An array of shape (n_samples,) representing the predicted Gaussian component for each data point.
         """
-        responsibilities = self._e_step(X)
+        responsibilities, _ = self._e_step(X)
         return np.argmax(responsibilities, axis=1)
 
     def predict_proba(self, X):
@@ -146,5 +150,71 @@ class GMM:
         Returns:
         - responsibilities: An array of shape (n_samples, n_components) representing the posterior probabilities.
         """
-        return self._e_step(X)
+        return self._e_step(X)[0]
 
+class BIC_GMM:
+    def __init__(self, max_components, n_fits=10, max_iter=100, tol=1e-3, km_init=False, km_cov_init=False):
+        """
+        Gaussian Mixture Model using the Expectation-Maximization algorithm.
+
+        Parameters:
+        - max_components: The maximum number of Gaussian components.
+        - n_fits: The number of GMM fits for each GMM parametrization.
+        - max_iter: Maximum number of iterations for each EM algorithm.
+        - tol: Tolerance to declare convergence based on the log-likelihood change.
+        """
+        self.max_components = max_components
+        self.n_fits = n_fits
+        self.max_iter = max_iter
+        self.tol = tol
+        self.kmeans_init = km_init
+        self.kmeans_covariance_init = km_cov_init
+        self.BICs = np.zeros(max_components)
+
+    def bic(self, gmm_model: Type[GMM], X):
+        """
+        Computes BIC(GMM) = L(x|pi, theta) - (Mk/2)log(n)
+        BIC criterion to maximize.
+        """
+        log_lh = np.sum(np.log(gmm_model._e_step(X)[1]))
+        k = gmm_model.n_components
+        n, d = X.shape
+        Mk = k - 1 + k*d + k*d*(d+1)/2
+
+        return log_lh - np.log(n)*Mk/2
+
+    def plot_BICs(self):
+        ks = list(range(1, self.max_components + 1))
+
+        plt.figure(figsize=(8, 6))
+        plt.plot(ks, self.BICs, marker='^')
+
+        plt.xlabel('Number of components')
+        plt.ylabel('BIC')
+        plt.show()
+
+    def fit(self, X):
+        """
+        Apply BIC criterion to find the best parameter k for GMM
+
+        Parameters:
+        - X: Input data of shape (n_samples, n_features).
+        """
+        
+        for k in range(1, self.max_components + 1):
+            running_BICs = []
+            for _ in range(self.n_fits):
+                gmm = GMM(n_components=k, max_iter=self.max_iter, tol=self.tol, 
+                          km_init=self.kmeans_init, km_cov_init=self.kmeans_covariance_init)
+                gmm.fit(X)
+                running_BICs.append(self.bic(gmm, X))
+            self.BICs[k-1] = np.mean(running_BICs)
+        
+        k_opt = np.argmax(self.BICs) + 1
+
+        gmm = GMM(n_components=k_opt, max_iter=self.max_iter, tol=self.tol, 
+                          km_init=self.kmeans_init, km_cov_init=self.kmeans_covariance_init)
+        gmm.fit(X)
+
+        return gmm, k_opt, self.BICs
+        

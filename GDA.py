@@ -1,6 +1,8 @@
 import numpy as np
-from sklearn.mixture import GaussianMixture
+from GMMs import GMM
 from joblib import Parallel, delayed
+
+
 # GMM Discriminant Analysis
 class GDA:
     def __init__(self, n_components=1, **GMM_kwargs):
@@ -16,23 +18,21 @@ class GDA:
         else:
             gmm_components = self.n_components
 
-        gmm = GaussianMixture(
-            n_components=gmm_components, **self.GMM_kwargs
-        )
+        gmm = GMM(n_components=gmm_components, **self.GMM_kwargs)
         gmm.fit(X[y == cls])
         return gmm
-
 
     def fit(self, X, y, n_jobs=1):
         self.classes_ = np.unique(y)
         self.gmms = {}
 
         # Parallel Fit GMM to each class
-        gmms = Parallel(n_jobs= n_jobs )(delayed(self.fit_class)(X,y, cls) for cls in self.classes_)
+        gmms = Parallel(n_jobs=n_jobs)(
+            delayed(self.fit_class)(X, y, cls) for cls in self.classes_
+        )
 
-        for k,cls in enumerate(self.classes_):
+        for k, cls in enumerate(self.classes_):
             self.gmms[cls] = gmms[k]
-
 
     def predict(self, X):
         log_likelihoods = np.zeros((X.shape[0], len(self.classes_)))

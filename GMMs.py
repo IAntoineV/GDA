@@ -24,7 +24,7 @@ class GMM:
         self.kmeans_init = km_init
         self.kmeans_covariance_init = km_cov_init
 
-    def _initialize_parameters(self, X):
+    def _initialize_parameters(self, X, eps=1e-10):
         """
         Initialize the GMM parameters: weights, means, and covariances.
 
@@ -52,7 +52,7 @@ class GMM:
             self.covariances_ = np.array(covariances_list_)
         else:
             self.covariances_ = np.array(
-                [np.cov(X.T) for _ in range(self.n_components)]
+                [np.cov(X.T) + eps * np.eye(X.shape[1]) for _ in range(self.n_components)]
             )
 
     def _likelihoods(self, X):

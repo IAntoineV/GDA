@@ -5,8 +5,11 @@ from scipy.stats import multivariate_normal
 from sklearn.cluster import KMeans
 import matplotlib.pyplot as plt
 
+
 class GMM:
-    def __init__(self, n_components, max_iter=100, tol=1e-3, km_init=False, km_cov_init=False):
+    def __init__(
+        self, n_components, max_iter=100, tol=1e-3, km_init=False, km_cov_init=False
+    ):
         """
         Gaussian Mixture Model using the Expectation-Maximization algorithm.
 
@@ -20,8 +23,8 @@ class GMM:
         self.tol = tol
         self.kmeans_init = km_init
         self.kmeans_covariance_init = km_cov_init
-        
-    def _initialize_parameters(self, X):
+
+    def _initialize_parameters(self, X, eps=1e-10):
         """
         Initialize the GMM parameters: weights, means, and covariances.
 
@@ -37,18 +40,31 @@ class GMM:
             self.means_ = kmeans.cluster_centers_
         else:
             self.means_ = X[np.random.choice(n_samples, self.n_components, False)]
-        
+
         if self.kmeans_init and self.kmeans_covariance_init:
-                covariances_list_ = []
-                for k in range(self.n_components):
-                    cluster_k = X[kmeans.labels_ == k]
-                    if cluster_k.shape[0] > 1:
-                        covariances_list_.append(np.cov(cluster_k.T))
-                    else:
-                        covariances_list_.append(np.eye(n_features) * 1e-6)
-                self.covariances_ = np.array(covariances_list_)
+            covariances_list_ = []
+            for k in range(self.n_components):
+                cluster_k = X[kmeans.labels_ == k]
+                if cluster_k.shape[0] > 1:
+                    covariances_list_.append(np.cov(cluster_k.T))
+                else:
+                    covariances_list_.append(np.eye(n_features) * 1e-6)
+            self.covariances_ = np.array(covariances_list_)
         else:
-            self.covariances_ = np.array([np.cov(X.T) for _ in range(self.n_components)])
+            self.covariances_ = np.array(
+                [np.cov(X.T) + eps * np.eye(X.shape[1]) for _ in range(self.n_components)]
+            )
+
+    def _likelihoods(self, X):
+        n_samples, _ = X.shape
+        likelihoods = np.zeros((n_samples, self.n_components))
+
+        # Compute the likelihood of each data point under each Gaussian component
+        for k in range(self.n_components):
+            likelihoods[:, k] = self.weights_[k] * multivariate_normal.pdf(
+                X, mean=self.means_[k], cov=self.covariances_[k], allow_singular=True
+            )
+        return likelihoods
 
     def _e_step(self, X):
         """
@@ -64,13 +80,7 @@ class GMM:
           given the paraemeters.
         """
         n_samples, n_features = X.shape
-        likelihoods = np.zeros((n_samples, self.n_components))
-
-        # Compute the likelihood of each data point under each Gaussian component
-        for k in range(self.n_components):
-            likelihoods[:, k] = self.weights_[k] * multivariate_normal.pdf(
-                X, mean=self.means_[k], cov=self.covariances_[k]
-            )
+        likelihoods = self._likelihoods(X)
         # Compute responsibilities (posterior probabilities)
         total_likelihood = np.sum(likelihoods, axis=1, keepdims=True)
         responsibilities = likelihoods / total_likelihood
@@ -122,7 +132,7 @@ class GMM:
 
             # Check for convergence
             new_log_likelihood = np.sum(np.log(total_likelihood))
-            
+
             if np.abs(new_log_likelihood - log_likelihood) < self.tol:
                 break
             log_likelihood = new_log_likelihood
@@ -152,8 +162,20 @@ class GMM:
         """
         return self._e_step(X)[0]
 
+    def score_samples(self, X):
+        return np.log(np.sum(self._likelihoods(X), axis=1))
+
+
 class BIC_GMM:
-    def __init__(self, max_components, n_fits=10, max_iter=100, tol=1e-3, km_init=False, km_cov_init=False):
+    def __init__(
+        self,
+        max_components,
+        n_fits=10,
+        max_iter=100,
+        tol=1e-3,
+        km_init=False,
+        km_cov_init=False,
+    ):
         """
         Gaussian Mixture Model using the Expectation-Maximization algorithm.
 
@@ -179,18 +201,18 @@ class BIC_GMM:
         log_lh = np.sum(np.log(gmm_model._e_step(X)[1]))
         k = gmm_model.n_components
         n, d = X.shape
-        Mk = k - 1 + k*d + k*d*(d+1)/2
+        Mk = k - 1 + k * d + k * d * (d + 1) / 2
 
-        return log_lh - np.log(n)*Mk/2
+        return log_lh - np.log(n) * Mk / 2
 
     def plot_BICs(self):
         ks = list(range(1, self.max_components + 1))
 
         plt.figure(figsize=(8, 6))
-        plt.plot(ks, self.BICs, marker='^')
+        plt.plot(ks, self.BICs, marker="^")
 
-        plt.xlabel('Number of components')
-        plt.ylabel('BIC')
+        plt.xlabel("Number of components")
+        plt.ylabel("BIC")
         plt.show()
 
     def fit(self, X):
@@ -200,21 +222,30 @@ class BIC_GMM:
         Parameters:
         - X: Input data of shape (n_samples, n_features).
         """
-        
+
         for k in range(1, self.max_components + 1):
             running_BICs = []
             for _ in range(self.n_fits):
-                gmm = GMM(n_components=k, max_iter=self.max_iter, tol=self.tol, 
-                          km_init=self.kmeans_init, km_cov_init=self.kmeans_covariance_init)
+                gmm = GMM(
+                    n_components=k,
+                    max_iter=self.max_iter,
+                    tol=self.tol,
+                    km_init=self.kmeans_init,
+                    km_cov_init=self.kmeans_covariance_init,
+                )
                 gmm.fit(X)
                 running_BICs.append(self.bic(gmm, X))
-            self.BICs[k-1] = np.mean(running_BICs)
-        
+            self.BICs[k - 1] = np.mean(running_BICs)
+
         k_opt = np.argmax(self.BICs) + 1
 
-        gmm = GMM(n_components=k_opt, max_iter=self.max_iter, tol=self.tol, 
-                          km_init=self.kmeans_init, km_cov_init=self.kmeans_covariance_init)
+        gmm = GMM(
+            n_components=k_opt,
+            max_iter=self.max_iter,
+            tol=self.tol,
+            km_init=self.kmeans_init,
+            km_cov_init=self.kmeans_covariance_init,
+        )
         gmm.fit(X)
 
         return gmm, k_opt, self.BICs
-        

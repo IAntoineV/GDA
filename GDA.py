@@ -12,7 +12,6 @@ class GDA:
         self.GMM_kwargs = GMM_kwargs
 
     def fit_class(self, X, y, cls):
-        print(cls)
         if isinstance(self.n_components, list):
             gmm_components = self.n_components[cls]
         else:

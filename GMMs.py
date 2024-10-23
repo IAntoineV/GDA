@@ -239,13 +239,16 @@ class BIC_GMM:
 
         k_opt = np.argmax(self.BICs) + 1
 
-        gmm = GMM(
+        self.gmm = GMM(
             n_components=k_opt,
             max_iter=self.max_iter,
             tol=self.tol,
             km_init=self.kmeans_init,
             km_cov_init=self.kmeans_covariance_init,
         )
-        gmm.fit(X)
+        self.gmm.fit(X)
 
-        return gmm, k_opt, self.BICs
+        return self.gmm, k_opt, self.BICs
+    
+    def score_samples(self, X):
+        return np.log(np.sum(self.gmm._likelihoods(X), axis=1))

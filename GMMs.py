@@ -113,7 +113,7 @@ class GMM:
             weighted_sum = np.dot(responsibilities[:, k] * diff.T, diff)
             self.covariances_[k] = weighted_sum / Nk[k]
 
-    def fit(self, X):
+    def fit(self, X, verbose=False):
         """
         Fit the GMM model to the data using the EM algorithm.
 
@@ -124,6 +124,8 @@ class GMM:
         log_likelihood = 0
 
         for i in range(self.max_iter):
+            if verbose:
+                print(f'{ int(1000 * i / self.max_iter)/10 }% fit')
             # E-step
             responsibilities, total_likelihood = self._e_step(X)
 

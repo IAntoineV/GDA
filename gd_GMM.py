@@ -4,7 +4,7 @@ import torch
 from matplotlib import pyplot as plt
 from torch.nn import Module
 from torch.nn.functional import softmax, log_softmax
-
+import tqdm
 from pykeops.torch import Vi, Vj, LazyTensor
 
 
@@ -13,14 +13,16 @@ from pykeops.torch import Vi, Vj, LazyTensor
 class GaussianMixture(Module):
     def __init__(self, M, sparsity=1, D=2):
         super(GaussianMixture, self).__init__()
-
+        self.dtype = torch.cuda.FloatTensor if torch.cuda.is_available() else torch.FloatTensor
         self.params = {}
         # We initialize our model with random blobs scattered across
         # the unit square, with a small-ish radius:
-        self.mu = torch.rand(M, D).type(dtype)
+        self.mu = torch.rand(M, D).type(self.dtype)
         self.A = 15 * torch.ones(M, 1, 1) * torch.eye(D, D).view(1, D, D)
-        self.A = (self.A).type(dtype).contiguous()
-        self.w = torch.ones(M, 1).type(dtype)
+        self.M = M
+        self.D = D
+        self.A = (self.A).type(self.dtype).contiguous()
+        self.w = torch.ones(M, 1).type(self.dtype)
         self.sparsity = sparsity
         self.mu.requires_grad, self.A.requires_grad, self.w.requires_grad = (
             True,
@@ -38,14 +40,9 @@ class GaussianMixture(Module):
     def covariances_determinants(self):
         """Computes the determinants of the covariance matrices.
 
-        N.B.: PyTorch still doesn't support batched determinants, so we have to
-              implement this formula by hand.
         """
-        S = self.params["gamma"]
-        if S.shape[1] == 2 * 2:
-            dets = S[:, 0] * S[:, 3] - S[:, 1] * S[:, 2]
-        else:
-            raise NotImplementedError
+        S = self.params["gamma"].view(self.M, self.D, self.D)
+        dets = torch.linalg.det(S)
         return dets.view(-1, 1)
 
     def weights(self):
@@ -120,15 +117,37 @@ class GaussianMixture(Module):
         # Scatter plot of the dataset:
         xy = sample.data.cpu().numpy()
         plt.scatter(xy[:, 0], xy[:, 1], 100 / len(xy), color="k")
-    def train(self, x, iterations=200, lr = 0.1):
+
+    def train(self, x, batch_size=None, iterations=200, lr=0.1, verbose=True):
 
         optimizer = torch.optim.Adam([self.A, self.w, self.mu], lr=lr)
+        dataset_size = x.shape[0]  # Assuming x is a dataset with shape (num_samples, features)
 
-        for it in range(iterations):
-            optimizer.zero_grad()  # Reset the gradients (PyTorch syntax...).
-            cost = self.neglog_likelihood(x)  # Cost to minimize.
-            cost.backward()  # Backpropagate to compute the gradient.
-            optimizer.step()
+        pbar = tqdm.tqdm(range(iterations), total=iterations)
+        for it in pbar:
+            # Shuffle data at each iteration for better generalization
+            if batch_size:
+                indices = torch.randperm(dataset_size)
+                shuffled_x = x[indices]  # Do not overwrite the original x
+            # Process data in batches
+            total_cost = 0.0  # Track loss for all batches
+            for it_batch,start_idx in enumerate(range(0, dataset_size, batch_size or dataset_size)):
+                # Create a batch
+                end_idx = min(start_idx + (batch_size or dataset_size), dataset_size)
+                batch = (shuffled_x if batch_size else x)[start_idx:end_idx]
+
+                optimizer.zero_grad()  # Reset gradients
+                cost = self.neglog_likelihood(batch)  # Compute cost for the batch
+                cost.backward()  # Backpropagation
+                optimizer.step()  # Update parameters
+
+                total_cost += cost.item()  # Accumulate batch loss
+
+            # Average the cost over all batches
+            avg_cost = total_cost / (dataset_size // (batch_size or dataset_size))
+
+            # Update progress bar with average loss
+            pbar.set_description(f"Loss: {avg_cost:.4f}")
 
 if "__main__" == __name__:
     # Choose the storage place for our data : CPU (host) or GPU (device) memory.

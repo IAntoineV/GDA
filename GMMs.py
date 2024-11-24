@@ -99,7 +99,6 @@ class GMM:
 
         # Total responsibility assigned to each component
         Nk = np.sum(responsibilities, axis=0)
-
         # Update weights
         self.weights_ = Nk / n_samples
 

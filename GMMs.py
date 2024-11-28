@@ -23,7 +23,7 @@ class GMM:
         self.tol = tol
         self.kmeans_init = km_init
         self.kmeans_covariance_init = km_cov_init
-
+        self.eps = 1e-5
     def _initialize_parameters(self, X, eps=1e-10):
         """
         Initialize the GMM parameters: weights, means, and covariances.
@@ -63,7 +63,7 @@ class GMM:
         for k in range(self.n_components):
             likelihoods[:, k] = self.weights_[k] * multivariate_normal.pdf(
                 X, mean=self.means_[k], cov=self.covariances_[k], allow_singular=True
-            )
+            ) + self.eps
         return likelihoods
 
     def _e_step(self, X):

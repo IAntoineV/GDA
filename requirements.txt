@@ -5,3 +5,5 @@ matplotlib
 torch
 torchvision
 torchaudio
+sentence_transformers
+umap_learn

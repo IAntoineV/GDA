@@ -2,8 +2,11 @@ from typing import Type
 
 import numpy as np
 from scipy.stats import multivariate_normal
+from scipy.stats import t
+from scipy.special import digamma, gamma
 from sklearn.cluster import KMeans
 import matplotlib.pyplot as plt
+
 
 
 class GMM:
@@ -253,3 +256,140 @@ class BIC_GMM:
     
     def score_samples(self, X):
         return np.log(np.sum(self.gmm._likelihoods(X), axis=1))
+
+class SMM:
+    def __init__(self, n_components, degrees_of_freedom, tol=1e-6, max_iter=100):
+        """
+        Initialize the Student's t-mixture model.
+
+        Parameters:
+        - n_components: int, number of mixture components
+        - degrees_of_freedom: float, degrees of freedom for the t-distribution
+        - tol: float, tolerance for convergence
+        - max_iter: int, maximum number of iterations
+        """
+        self.n_components = n_components
+        self.nu = degrees_of_freedom
+        self.tol = tol
+        self.max_iter = max_iter
+
+        # Model parameters
+        self.weights_ = None
+        self.means_ = None
+        self.covariances_ = None
+        self.eps = 1e-5
+
+    def _initialize_params(self, X):
+        """Randomly initialize mixture parameters."""
+        n_samples, n_features = X.shape
+        self.weights_ = np.ones(self.n_components) / self.n_components
+        self.means_ = X[np.random.choice(n_samples, self.n_components, replace=False)]
+        self.covariances_ = np.array([np.cov(X, rowvar=False)] * self.n_components)
+        
+    def _likelihoods(self, X):
+        n_samples, _ = X.shape
+        likelihoods = np.zeros((n_samples, self.n_components))
+
+        # Compute the likelihood of each data point under each Gaussian component
+        for k in range(self.n_components):
+            likelihoods[:, k] = self.weights_[k] * multivariate_normal.pdf(
+                X, mean=self.means_[k], cov=self.covariances_[k], allow_singular=True
+            ) + self.eps
+        return likelihoods
+
+    def _e_step(self, X):
+        """Perform the Expectation step."""
+        n_samples, _ = X.shape
+        responsibilities = np.zeros((n_samples, self.n_components))
+
+        for k in range(self.n_components):
+            diff = X - self.means_[k]
+            inv_cov = np.linalg.inv(self.covariances_[k])
+            quad_form = np.sum(diff @ inv_cov * diff, axis=1)
+
+            const = gamma((self.nu + X.shape[1]) / 2) / (
+                gamma(self.nu / 2) * (self.nu * np.pi) ** (X.shape[1] / 2) * np.sqrt(np.linalg.det(self.covariances_[k]))
+            )
+            responsibilities[:, k] = self.weights_[k] * const * (1 + quad_form / self.nu) ** (-(self.nu + X.shape[1]) / 2)
+
+        # Normalize responsibilities
+        responsibilities /= responsibilities.sum(axis=1, keepdims=True)
+        return responsibilities
+
+    def _m_step(self, X, responsibilities):
+        """Perform the Maximization step."""
+        n_samples, n_features = X.shape
+
+        # Effective number of points for each component
+        Nk = responsibilities.sum(axis=0)
+
+        # Update weights
+        self.weights_ = Nk / n_samples
+
+        # Update means
+        self.means_ = np.array([
+            (responsibilities[:, k, None] * X).sum(axis=0) / Nk[k]
+            for k in range(self.n_components)
+        ])
+
+        # Update covariances
+        self.covariances_ = np.array([
+            np.cov(X - self.means_[k], rowvar=False, aweights=responsibilities[:, k])
+            for k in range(self.n_components)
+        ])
+
+    def fit(self, X):
+        """
+        Fit the model to the data using the EM algorithm.
+
+        Parameters:
+        - X: ndarray of shape (n_samples, n_features), input data
+        """
+        n_samples, n_features = X.shape
+        self._initialize_params(X)
+
+        log_likelihood = -np.inf
+        for iteration in range(self.max_iter):
+            # E-step
+            responsibilities = self._e_step(X)
+
+            # M-step
+            self._m_step(X, responsibilities)
+
+            # Compute log-likelihood
+            new_log_likelihood = np.sum(
+                np.log(np.sum(responsibilities, axis=1))
+            )
+
+            if np.abs(new_log_likelihood - log_likelihood) < self.tol:
+                print(f"Converged at iteration {iteration}.")
+                break
+
+            log_likelihood = new_log_likelihood
+
+    def predict_proba(self, X):
+        """
+        Predict the posterior probabilities for each component.
+
+        Parameters:
+        - X: ndarray of shape (n_samples, n_features), input data
+
+        Returns:
+        - responsibilities: ndarray of shape (n_samples, n_components)
+        """
+        return self._e_step(X)
+
+    def predict(self, X):
+        """
+        Predict the most likely component for each sample.
+
+        Parameters:
+        - X: ndarray of shape (n_samples, n_features), input data
+
+        Returns:
+        - labels: ndarray of shape (n_samples,), predicted component labels
+        """
+        return np.argmax(self.predict_proba(X), axis=1)
+
+    def score_samples(self, X):
+        return np.log(np.sum(self._likelihoods(X), axis=1))

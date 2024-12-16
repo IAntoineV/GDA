@@ -6,4 +6,6 @@ torch
 torchvision
 torchaudio
 sentence_transformers
+datasets
+joblib
 umap_learn

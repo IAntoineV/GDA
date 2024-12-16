@@ -11,8 +11,8 @@ import matplotlib.pyplot as plt
 
 class GMM:
     def __init__(
-        self, n_components, max_iter=100, tol=1e-3, km_init=False, km_cov_init=False
-    ):
+        self, n_components, max_iter=100, tol=1e-3, km_init=False, km_cov_init=False,
+    covariance_type="full"):
         """
         Gaussian Mixture Model using the Expectation-Maximization algorithm.
 
@@ -22,6 +22,7 @@ class GMM:
         - tol: Tolerance to declare convergence based on the log-likelihood change.
         """
         self.n_components = n_components
+        self.covariance_type = covariance_type
         self.max_iter = max_iter
         self.tol = tol
         self.kmeans_init = km_init
@@ -83,9 +84,10 @@ class GMM:
           given the paraemeters.
         """
         n_samples, n_features = X.shape
+        eps = 1e-4
         likelihoods = self._likelihoods(X)
         # Compute responsibilities (posterior probabilities)
-        total_likelihood = np.sum(likelihoods, axis=1, keepdims=True)
+        total_likelihood = np.sum(likelihoods, axis=1, keepdims=True) + eps
         responsibilities = likelihoods / total_likelihood
         return responsibilities, total_likelihood
 
@@ -109,11 +111,28 @@ class GMM:
         self.means_ = np.dot(responsibilities.T, X) / Nk[:, np.newaxis]
 
         # Update covariances
+        
         self.covariances_ = np.zeros((self.n_components, n_features, n_features))
-        for k in range(self.n_components):
-            diff = X - self.means_[k]
-            weighted_sum = np.dot(responsibilities[:, k] * diff.T, diff)
-            self.covariances_[k] = weighted_sum / Nk[k]
+        if self.covariance_type == "full":
+            for k in range(self.n_components):
+                diff = X - self.means_[k]
+                weighted_sum = np.dot(responsibilities[:, k] * diff.T, diff)
+                self.covariances_[k] = weighted_sum / Nk[k]
+        elif self.covariance_type == "diag":
+            for k in range(self.n_components):
+                diff = X - self.means_[k]
+                weighted_sum = np.dot(responsibilities[:, k] * diff.T, diff)
+                self.covariances_[k] = np.diag(np.diag(weighted_sum)) / Nk[k]
+        elif self.covariance_type == "tied":
+            diff = X - self.means_[0]
+            weighted_sum = np.dot(responsibilities[:, 0] * diff.T, diff)
+            for k in range(self.n_components):
+                self.covariances_[k] = weighted_sum / Nk[k]
+        elif self.covariance_type == "spherical":
+            diff = X - self.means_[0]
+            weighted_sum = np.dot(responsibilities[:, 0] * diff.T, diff)
+            for k in range(self.n_components):
+                self.covariances_[k] = np.diag(np.diag(weighted_sum)) / Nk[k]
 
     def fit(self, X, verbose=False):
         """
@@ -169,7 +188,6 @@ class GMM:
     def score_samples(self, X):
         return np.log(np.sum(self._likelihoods(X), axis=1))
 
-
 class BIC_GMM:
     def __init__(
         self,
@@ -179,6 +197,7 @@ class BIC_GMM:
         tol=1e-3,
         km_init=False,
         km_cov_init=False,
+        covariance_type="full",
     ):
         """
         Gaussian Mixture Model using the Expectation-Maximization algorithm.
@@ -195,6 +214,7 @@ class BIC_GMM:
         self.tol = tol
         self.kmeans_init = km_init
         self.kmeans_covariance_init = km_cov_init
+        self.covariance_type = covariance_type
         self.BICs = np.zeros(max_components)
 
     def bic(self, gmm_model: Type[GMM], X):
@@ -236,6 +256,7 @@ class BIC_GMM:
                     tol=self.tol,
                     km_init=self.kmeans_init,
                     km_cov_init=self.kmeans_covariance_init,
+                    covariance_type=self.covariance_type,
                 )
                 gmm.fit(X)
                 running_BICs.append(self.bic(gmm, X))
